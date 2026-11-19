@@ -1477,3 +1477,39 @@ input[type="file"] {
         transition-duration: 0.01ms !important;
     }
 }
+
+.password-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.password-wrapper input {
+    width: 100%;
+    padding-right: 45px;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    background: transparent;
+    border: none;
+    color: #777;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.password-toggle:hover {
+    color: #222;
+}
+
+.password-toggle:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+    border-radius: 4px;
+}
