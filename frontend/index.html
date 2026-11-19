@@ -1,0 +1,524 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Data Integrity Monitor</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="./styles.css">
+
+    <!-- JavaScript -->
+    <script src="./app.js" defer></script>
+</head>
+
+<body>
+
+    <!-- AUTHENTICATION -->
+    <section id="authView" class="auth-container">
+        <div class="auth-background-word">INTEGRITY</div>
+
+        <div class="auth-card">
+            <div class="auth-logo">D.</div>
+
+            <p class="eyebrow">DATA QUALITY PLATFORM</p>
+
+            <h1>Make your data<br>trustworthy.</h1>
+
+            <p class="auth-description">
+                Analyze, understand and improve your datasets
+                with one intelligent workspace.
+            </p>
+
+            <form id="authForm">
+                <label for="username">Username</label>
+                <input
+                    type="text"
+                    id="username"
+                    placeholder="Enter your username"
+                    required
+                >
+
+                <label for="password">Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    placeholder="Enter your password"
+                    required
+                >
+
+                <button type="submit" id="authSubmit" class="primary-button">
+                    Login <span>↗</span>
+                </button>
+            </form>
+
+            <p id="authMessage" class="message"></p>
+
+            <div class="auth-switch">
+                <span id="switchLabel">Don't have an account?</span>
+                <button type="button" id="switchAuth" class="text-button">
+                    Register
+                </button>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- MAIN APPLICATION -->
+    <div id="appView" class="app-shell" hidden>
+
+        <!-- FLOATING NAVIGATION -->
+        <header class="topbar">
+
+            <a href="#" class="brand" aria-label="Data Integrity Monitor">
+                <span class="brand-mark">D.</span>
+                <span class="brand-name">DATA INTEGRITY<br>MONITOR</span>
+            </a>
+
+            <nav class="navigation">
+                <button class="nav-button active" data-view="dashboard">
+                    Overview
+                </button>
+
+                <button class="nav-button" data-view="datasets">
+                    Datasets
+                </button>
+
+                <button class="nav-button" data-view="analysis">
+                    Analysis
+                </button>
+
+                <button class="nav-button" data-view="cleaning">
+                    Cleaning
+                </button>
+            </nav>
+
+            <button id="logoutButton" class="logout-button">
+                <span class="logout-dot"></span>
+                Logout
+            </button>
+
+        </header>
+
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+
+            <!-- DASHBOARD -->
+            <section id="dashboard" class="view">
+
+                <div class="hero-section">
+
+                    <div class="hero-topline">
+                        <span class="eyebrow">YOUR DATA WORKSPACE</span>
+                        <span class="hero-index">01 / OVERVIEW</span>
+                    </div>
+
+                    <div class="hero-title-area">
+                        <div class="hero-background-word">
+                            INTEGRITY
+                        </div>
+
+                        <div class="hero-copy">
+                            <p class="eyebrow">DATA QUALITY, REIMAGINED</p>
+
+                            <h1>
+                                Your data.<br>
+                                <span>Under control.</span>
+                            </h1>
+
+                            <p class="hero-description">
+                                Discover inconsistencies, understand your
+                                datasets and build confidence in every row.
+                            </p>
+
+                            <button class="discover-button" data-go="datasets">
+                                EXPLORE DATASETS <span>↗</span>
+                            </button>
+                        </div>
+
+                        <div class="hero-decoration">
+                            <div class="orbit orbit-one"></div>
+                            <div class="orbit orbit-two"></div>
+                            <div class="orbit-center">D.</div>
+                        </div>
+                    </div>
+
+                    <div class="hero-footer">
+                        <span>ANALYZE</span>
+                        <span class="hero-line"></span>
+                        <span>VALIDATE</span>
+                        <span class="hero-line"></span>
+                        <span>IMPROVE</span>
+                    </div>
+
+                </div>
+
+
+                <!-- DASHBOARD STATISTICS -->
+                <div class="section-intro">
+                    <div>
+                        <p class="eyebrow">WORKSPACE OVERVIEW</p>
+                        <h2>Your data at a glance.</h2>
+                    </div>
+
+                    <span class="section-number">01 — 03</span>
+                </div>
+
+
+                <div class="stats-grid">
+
+                    <div class="stat-card stat-featured">
+                        <div class="stat-top">
+                            <span>01 / DATASETS</span>
+                            <span class="stat-icon">↗</span>
+                        </div>
+
+                        <h3 id="datasetCount">0</h3>
+                        <p>Total uploaded datasets</p>
+                    </div>
+
+
+                    <div class="stat-card">
+                        <div class="stat-top">
+                            <span>02 / CURRENT</span>
+                            <span class="stat-icon">◉</span>
+                        </div>
+
+                        <h3 id="selectedDataset">—</h3>
+                        <p>Selected dataset ID</p>
+                    </div>
+
+
+                    <div class="stat-card">
+                        <div class="stat-top">
+                            <span>03 / QUALITY</span>
+                            <span class="stat-icon">✳</span>
+                        </div>
+
+                        <h3 id="missingCount">—</h3>
+                        <p>Missing values detected</p>
+                    </div>
+
+                </div>
+
+
+                <!-- QUICK ACTIONS -->
+                <div class="section-intro">
+                    <div>
+                        <p class="eyebrow">GET STARTED</p>
+                        <h2>What would you like to do?</h2>
+                    </div>
+                </div>
+
+
+                <div class="quick-actions">
+
+                    <button class="action-card" data-go="datasets">
+                        <span class="action-number">01</span>
+                        <span class="action-icon">＋</span>
+                        <h3>Upload dataset</h3>
+                        <p>Bring your CSV files into your workspace.</p>
+                        <span class="action-arrow">↗</span>
+                    </button>
+
+
+                    <button class="action-card" data-go="analysis">
+                        <span class="action-number">02</span>
+                        <span class="action-icon">⌕</span>
+                        <h3>Analyze data</h3>
+                        <p>Understand missing values and data structure.</p>
+                        <span class="action-arrow">↗</span>
+                    </button>
+
+
+                    <button class="action-card" data-go="cleaning">
+                        <span class="action-number">03</span>
+                        <span class="action-icon">✳</span>
+                        <h3>Explore cleaning</h3>
+                        <p>Inspect data issues before cleaning.</p>
+                        <span class="action-arrow">↗</span>
+                    </button>
+
+                </div>
+
+            </section>
+
+
+            <!-- DATASETS -->
+            <section id="datasets" class="view" hidden>
+
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">YOUR WORKSPACE / 02</p>
+                        <h1>Dataset library.</h1>
+                        <p>Manage and organize your uploaded CSV files.</p>
+                    </div>
+
+                    <span class="heading-decoration">02</span>
+                </div>
+
+
+                <div class="upload-panel">
+
+                    <div class="upload-copy">
+                        <p class="eyebrow">ADD NEW DATA</p>
+
+                        <h2>Bring your data<br>into focus.</h2>
+
+                        <p>
+                            Upload a CSV file to begin analyzing its
+                            structure and data quality.
+                        </p>
+                    </div>
+
+
+                    <form id="uploadForm" class="upload-form">
+
+                        <div class="upload-icon">↑</div>
+
+                        <label for="csvFile">SELECT YOUR CSV FILE</label>
+
+                        <input
+                            type="file"
+                            id="csvFile"
+                            accept=".csv"
+                            required
+                        >
+
+                        <p class="upload-hint">
+                            CSV files only · Maximum size 5 MB
+                        </p>
+
+                        <button type="submit" class="primary-button">
+                            Upload dataset <span>↗</span>
+                        </button>
+
+                        <p id="uploadMessage" class="message"></p>
+
+                    </form>
+
+                </div>
+
+
+                <div class="library-heading">
+                    <div>
+                        <p class="eyebrow">YOUR COLLECTION</p>
+                        <h2>Uploaded datasets</h2>
+                    </div>
+
+                    <button id="refreshDatasets" class="outline-button">
+                        ↻ Refresh
+                    </button>
+                </div>
+
+
+                <div id="datasetList" class="dataset-list">
+                    <div class="empty-state">
+                        Your datasets will appear here.
+                    </div>
+                </div>
+
+            </section>
+
+
+            <!-- ANALYSIS -->
+            <section id="analysis" class="view" hidden>
+
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">DATA INTELLIGENCE / 03</p>
+                        <h1>Understand your data.</h1>
+                        <p>Explore the structure and quality of your dataset.</p>
+                    </div>
+
+                    <span class="heading-decoration">03</span>
+                </div>
+
+
+                <div class="selection-panel">
+                    <div>
+                        <p class="eyebrow">SELECT A DATASET</p>
+                        <h2>Choose what to inspect.</h2>
+                    </div>
+
+                    <div class="selection-controls">
+                        <select id="analysisDataset">
+                            <option value="">Select a dataset</option>
+                        </select>
+
+                        <button id="runAnalysis" class="primary-button">
+                            Run analysis <span>↗</span>
+                        </button>
+                    </div>
+                </div>
+
+
+                <div id="analysisResults">
+                    <div class="empty-state">
+                        <div class="empty-icon">⌕</div>
+                        <h3>Your analysis will appear here.</h3>
+                        <p>Select a dataset and run an analysis to see its results.</p>
+                    </div>
+                </div>
+
+            </section>
+
+
+            <!-- CLEANING -->
+            <section id="cleaning" class="view" hidden>
+
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">DATA IMPROVEMENT / 04</p>
+                        <h1>Refine your data.</h1>
+                        <p>Inspect data quality issues and explore cleaning operations.</p>
+                    </div>
+
+                    <span class="heading-decoration">04</span>
+                </div>
+
+
+                <div class="selection-panel">
+                    <div>
+                        <p class="eyebrow">CLEANING PROFILE</p>
+                        <h2>Choose your dataset.</h2>
+                    </div>
+
+                    <div class="selection-controls">
+                        <select id="cleanDataset">
+                            <option value="">Select a dataset</option>
+                        </select>
+
+                        <button id="loadCleaning" class="primary-button">
+                            Load profile <span>↗</span>
+                        </button>
+                    </div>
+                </div>
+
+
+                <div id="cleaningProfile">
+                    <div class="empty-state">
+                        <div class="empty-icon">✳</div>
+                        <h3>No cleaning profile loaded.</h3>
+                        <p>Select a dataset to inspect its data quality.</p>
+                    </div>
+                </div>
+
+
+                <div class="cleaning-operations">
+
+                    <div class="section-intro">
+                        <div>
+                            <p class="eyebrow">CLEANING WORKSPACE</p>
+                            <h2>Choose an operation.</h2>
+                        </div>
+                    </div>
+
+
+                    <div class="operation-panel">
+
+                        <label for="operation">Cleaning operation</label>
+
+                        <select id="operation">
+                            <option value="">Choose operation</option>
+                            <option value="fill">Fill missing values</option>
+                            <option value="duplicates">Remove duplicate rows</option>
+                            <option value="range">Validate numeric range</option>
+                            <option value="numeric">Convert columns to numeric</option>
+                        </select>
+
+
+                        <div id="fillFields" hidden>
+                            <label for="columnsInput">
+                                Columns (comma separated)
+                            </label>
+
+                            <input
+                                type="text"
+                                id="columnsInput"
+                                placeholder="age, salary"
+                            >
+
+                            <label for="fillValue">Manual fill value</label>
+
+                            <input
+                                type="number"
+                                id="fillValue"
+                                placeholder="Enter a value"
+                            >
+                        </div>
+
+
+                        <div id="rangeFields" hidden>
+                            <label for="rangeColumn">Column name</label>
+
+                            <input
+                                type="text"
+                                id="rangeColumn"
+                                placeholder="age"
+                            >
+
+                            <label for="minValue">Minimum value</label>
+
+                            <input
+                                type="number"
+                                id="minValue"
+                            >
+
+                            <label for="maxValue">Maximum value</label>
+
+                            <input
+                                type="number"
+                                id="maxValue"
+                            >
+                        </div>
+
+
+                        <div id="numericFields" hidden>
+                            <label for="numericColumns">
+                                Columns to convert (comma separated)
+                            </label>
+
+                            <input
+                                type="text"
+                                id="numericColumns"
+                                placeholder="age, salary"
+                            >
+                        </div>
+
+
+                        <div class="cleaning-notice">
+                            <span>✳</span>
+                            <p>
+                                Cleaning execution will be connected after
+                                the backend cleaning endpoint is finalized.
+                            </p>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+        </main>
+
+
+        <!-- FOOTER -->
+        <footer class="app-footer">
+            <span>DATA INTEGRITY MONITOR</span>
+            <span>BUILT FOR BETTER DATA.</span>
+        </footer>
+
+    </div>
+
+</body>
+</html>
