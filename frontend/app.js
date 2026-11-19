@@ -4,7 +4,7 @@
    APPLICATION JAVASCRIPT
 ========================================= */
 
-const API = "http://127.0.0.1:8000";
+const API = "https://data-integrity-monitor.onrender.com";
 
 let accessToken = localStorage.getItem("access_token");
 let refreshToken = localStorage.getItem("refresh_token");
