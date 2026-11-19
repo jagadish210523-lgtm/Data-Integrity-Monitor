@@ -15,6 +15,23 @@ let datasets = [];
 
 
 // =========================================
+// PASSWORD VISIBILITY TOGGLE
+// =========================================
+
+document.getElementById("togglePassword").addEventListener("click", () => {
+
+    const password = document.getElementById("password");
+    const toggle = document.getElementById("togglePassword");
+
+    const isHidden = password.type === "password";
+
+    password.type = isHidden ? "text" : "password";
+    toggle.textContent = isHidden ? "HIDE" : "SHOW";
+
+});
+
+
+// =========================================
 // API REQUEST HANDLER
 // =========================================
 
