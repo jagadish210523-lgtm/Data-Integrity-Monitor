@@ -1,3 +1,4 @@
+
 /* =========================================
    DATA INTEGRITY MONITOR
    APPLICATION JAVASCRIPT
@@ -12,212 +13,36 @@ let username = localStorage.getItem("username");
 let authMode = "login";
 let datasets = [];
 
-
-// =========================================
-// PASSWORD VISIBILITY TOGGLE
-// =========================================
-
-document.getElementById("togglePassword").addEventListener("click", () => {
-
-    const password = document.getElementById("password");
-    const toggle = document.getElementById("togglePassword");
-    const eyeIcon = document.getElementById("eyeIcon");
-
-    const isHidden = password.type === "password";
-
-    password.type = isHidden ? "text" : "password";
-
-    toggle.setAttribute(
-        "aria-label",
-        isHidden ? "Hide password" : "Show password"
-    );
-
-    toggle.setAttribute(
-        "title",
-        isHidden ? "Hide password" : "Show password"
-    );
-
-    eyeIcon.innerHTML = isHidden
-        ? `
-            <path d="M3 3l18 18"/>
-            <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/>
-            <path d="M9.9 5.2A11 11 0 0 1 12 5c6.4 0 10 7 10 7a15.8 15.8 0 0 1-4 4.9"/>
-            <path d="M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7c1.1 0 2.1-.2 3-.5"/>
-          `
-        : `
-            <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>
-            <circle cx="12" cy="12" r="3"/>
-          `;
-
-});
+let refreshPromise = null;
 
 
 // =========================================
-// API REQUEST HANDLER
+// DOM HELPER
 // =========================================
 
-function headers() {
-    return accessToken
-        ? { Authorization: `Bearer ${accessToken}` }
-        : {};
+function getElement(id) {
+    return document.getElementById(id);
 }
 
 
-async function apiRequest(url, options = {}) {
+// =========================================
+// AUTHENTICATION STATE
+// =========================================
 
-    const response = await fetch(API + url, {
-        ...options,
-        headers: {
-            ...headers(),
-            ...(options.headers || {})
-        }
-    });
+function saveTokens(access, refresh = null) {
 
-    const data = await response.json().catch(() => null);
+    accessToken = access;
 
-    if (!response.ok) {
-        throw new Error(data?.detail || `Request failed (${response.status})`);
+    localStorage.setItem("access_token", accessToken);
+
+    if (refresh) {
+        refreshToken = refresh;
+        localStorage.setItem("refresh_token", refreshToken);
     }
-
-    return data;
 }
 
 
-// =========================================
-// AUTHENTICATION
-// =========================================
-
-function setAuthMode(mode) {
-
-    authMode = mode;
-
-    document.getElementById("authSubmit").innerHTML =
-        mode === "login"
-            ? 'Login <span>↗</span>'
-            : 'Create account <span>↗</span>';
-
-    document.getElementById("switchLabel").textContent =
-        mode === "login"
-            ? "Don't have an account?"
-            : "Already have an account?";
-
-    document.getElementById("switchAuth").textContent =
-        mode === "login" ? "Register" : "Login";
-
-    document.getElementById("authMessage").textContent = "";
-    document.getElementById("authMessage").classList.remove("error");
-}
-
-
-// SWITCH LOGIN AND REGISTER
-
-document.getElementById("switchAuth").addEventListener("click", () => {
-
-    setAuthMode(
-        authMode === "login" ? "register" : "login"
-    );
-
-});
-
-
-// AUTHENTICATION FORM
-
-document.getElementById("authForm").addEventListener("submit", async (event) => {
-
-    event.preventDefault();
-
-    const usernameValue = document.getElementById("username").value.trim();
-    const passwordValue = document.getElementById("password").value;
-
-    const message = document.getElementById("authMessage");
-    const button = document.getElementById("authSubmit");
-
-    message.textContent = "";
-    message.classList.remove("error");
-
-    button.disabled = true;
-
-    try {
-
-        // REGISTER
-
-        if (authMode === "register") {
-
-            await apiRequest("/Register", {
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify({
-                    username: usernameValue,
-                    password: passwordValue
-                })
-            });
-
-            setAuthMode("login");
-
-            document.getElementById("username").value = usernameValue;
-
-            message.textContent =
-                "Registration successful. You can now login.";
-
-        }
-
-        // LOGIN
-
-        else {
-
-            const formData = new URLSearchParams();
-
-            formData.append("username", usernameValue);
-            formData.append("password", passwordValue);
-
-            const data = await apiRequest("/login", {
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-
-                body: formData
-            });
-
-            accessToken = data.access_token;
-            refreshToken = data.refresh_token;
-            username = usernameValue;
-
-            localStorage.setItem("access_token", accessToken);
-            localStorage.setItem("refresh_token", refreshToken);
-            localStorage.setItem("username", username);
-
-            await showApplication();
-
-        }
-
-    } catch (error) {
-
-        message.textContent = error.message;
-        message.classList.add("error");
-
-    } finally {
-
-        button.disabled = false;
-
-    }
-
-});
-
-
-// =========================================
-// LOGOUT
-// =========================================
-
-document.getElementById("logoutButton").addEventListener("click", logout);
-
-
-function logout() {
+function clearSession() {
 
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
@@ -228,11 +53,391 @@ function logout() {
     username = null;
 
     datasets = [];
+}
 
-    document.getElementById("appView").hidden = true;
-    document.getElementById("authView").hidden = false;
 
-    document.getElementById("authForm").reset();
+// =========================================
+// REQUEST HEADERS
+// =========================================
+
+function headers() {
+
+    return accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : {};
+}
+
+
+// =========================================
+// REFRESH ACCESS TOKEN
+// POST /refresh
+// =========================================
+
+async function refreshAccessToken() {
+
+    if (!refreshToken) {
+        throw new Error("Your session has expired. Please login again.");
+    }
+
+    if (refreshPromise) {
+        return refreshPromise;
+    }
+
+    refreshPromise = (async () => {
+
+        const response = await fetch(`${API}/refresh`, {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                refresh_token: refreshToken
+            })
+
+        });
+
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+
+            throw new Error(
+                data?.detail || "Unable to refresh your session."
+            );
+
+        }
+
+        if (!data?.access_token) {
+
+            throw new Error("The refresh endpoint did not return an access token.");
+
+        }
+
+        // Backend returns only a new access token.
+        saveTokens(data.access_token);
+
+        return accessToken;
+
+    })();
+
+    try {
+
+        return await refreshPromise;
+
+    } finally {
+
+        refreshPromise = null;
+
+    }
+}
+
+
+// =========================================
+// API REQUEST HANDLER
+// =========================================
+
+async function apiRequest(url, options = {}, retry = true) {
+
+    const requestOptions = { ...options };
+
+    const requestHeaders = {
+        ...headers(),
+        ...(requestOptions.headers || {})
+    };
+
+    // Let the browser generate the multipart boundary.
+    if (requestOptions.body instanceof FormData) {
+        delete requestHeaders["Content-Type"];
+    }
+
+    const response = await fetch(`${API}${url}`, {
+
+        ...requestOptions,
+
+        headers: requestHeaders
+
+    });
+
+    const data = await response.json().catch(() => null);
+
+    // Refresh expired access tokens and retry the request.
+    if (
+        response.status === 401 &&
+        retry &&
+        refreshToken &&
+        url !== "/login" &&
+        url !== "/Register" &&
+        url !== "/refresh"
+    ) {
+
+        try {
+
+            await refreshAccessToken();
+
+            return await apiRequest(url, options, false);
+
+        } catch (error) {
+
+            logout();
+
+            throw new Error(
+                "Your session has expired. Please login again."
+            );
+
+        }
+    }
+
+    if (!response.ok) {
+
+        throw new Error(
+            data?.detail ||
+            data?.message ||
+            `Request failed (${response.status})`
+        );
+
+    }
+
+    return data;
+}
+
+
+// =========================================
+// PASSWORD VISIBILITY TOGGLE
+// =========================================
+
+if (getElement("togglePassword")) {
+
+    getElement("togglePassword").addEventListener("click", () => {
+
+        const password = getElement("password");
+        const toggle = getElement("togglePassword");
+        const eyeIcon = getElement("eyeIcon");
+
+        const isHidden = password.type === "password";
+
+        password.type = isHidden ? "text" : "password";
+
+        toggle.setAttribute(
+            "aria-label",
+            isHidden ? "Hide password" : "Show password"
+        );
+
+        toggle.setAttribute(
+            "title",
+            isHidden ? "Hide password" : "Show password"
+        );
+
+        eyeIcon.innerHTML = isHidden
+            ? `
+                <path d="M3 3l18 18"/>
+                <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/>
+                <path d="M9.9 5.2A11 11 0 0 1 12 5c6.4 0 10 7 10 7a15.8 15.8 0 0 1-4 4.9"/>
+                <path d="M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7c1.1 0 2.1-.2 3-.5"/>
+              `
+            : `
+                <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              `;
+
+    });
+
+}
+
+
+// =========================================
+// AUTHENTICATION MODE
+// =========================================
+
+function setAuthMode(mode) {
+
+    authMode = mode;
+
+    if (getElement("authSubmit")) {
+
+        getElement("authSubmit").innerHTML =
+            mode === "login"
+                ? 'Login <span>↗</span>'
+                : 'Create account <span>↗</span>';
+
+    }
+
+    if (getElement("switchLabel")) {
+
+        getElement("switchLabel").textContent =
+            mode === "login"
+                ? "Don't have an account?"
+                : "Already have an account?";
+
+    }
+
+    if (getElement("switchAuth")) {
+
+        getElement("switchAuth").textContent =
+            mode === "login" ? "Register" : "Login";
+
+    }
+
+    if (getElement("authMessage")) {
+
+        getElement("authMessage").textContent = "";
+        getElement("authMessage").classList.remove("error");
+
+    }
+}
+
+
+// =========================================
+// SWITCH LOGIN / REGISTER
+// =========================================
+
+if (getElement("switchAuth")) {
+
+    getElement("switchAuth").addEventListener("click", () => {
+
+        setAuthMode(
+            authMode === "login" ? "register" : "login"
+        );
+
+    });
+
+}
+
+
+// =========================================
+// REGISTER AND LOGIN
+// =========================================
+
+if (getElement("authForm")) {
+
+    getElement("authForm").addEventListener("submit", async (event) => {
+
+        event.preventDefault();
+
+        const usernameValue = getElement("username").value.trim();
+        const passwordValue = getElement("password").value;
+
+        const message = getElement("authMessage");
+        const button = getElement("authSubmit");
+
+        message.textContent = "";
+        message.classList.remove("error");
+
+        button.disabled = true;
+
+        try {
+
+            if (!usernameValue || !passwordValue) {
+                throw new Error("Please enter your username and password.");
+            }
+
+            // REGISTER
+            if (authMode === "register") {
+
+                const data = await apiRequest("/Register", {
+
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        username: usernameValue,
+                        password: passwordValue
+                    })
+
+                });
+
+                setAuthMode("login");
+
+                getElement("username").value = usernameValue;
+
+                message.textContent =
+                    data?.message || "Registration successful. You can now login.";
+
+            }
+
+            // LOGIN
+            else {
+
+                const formData = new URLSearchParams();
+
+                formData.append("username", usernameValue);
+                formData.append("password", passwordValue);
+
+                const data = await apiRequest("/login", {
+
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+
+                    body: formData
+
+                });
+
+                if (!data.access_token || !data.refresh_token) {
+                    throw new Error("Login response is missing authentication tokens.");
+                }
+
+                saveTokens(
+                    data.access_token,
+                    data.refresh_token
+                );
+
+                username = usernameValue;
+
+                localStorage.setItem("username", username);
+
+                await showApplication();
+
+            }
+
+        } catch (error) {
+
+            message.textContent = error.message;
+            message.classList.add("error");
+
+        } finally {
+
+            button.disabled = false;
+
+        }
+
+    });
+
+}
+
+
+// =========================================
+// LOGOUT
+// =========================================
+
+if (getElement("logoutButton")) {
+
+    getElement("logoutButton").addEventListener("click", logout);
+
+}
+
+
+function logout() {
+
+    clearSession();
+
+    if (getElement("appView")) {
+        getElement("appView").hidden = true;
+    }
+
+    if (getElement("authView")) {
+        getElement("authView").hidden = false;
+    }
+
+    if (getElement("authForm")) {
+        getElement("authForm").reset();
+    }
 
     setAuthMode("login");
 
@@ -245,8 +450,8 @@ function logout() {
 
 async function showApplication() {
 
-    document.getElementById("authView").hidden = true;
-    document.getElementById("appView").hidden = false;
+    getElement("authView").hidden = true;
+    getElement("appView").hidden = false;
 
     showView("dashboard");
 
@@ -270,12 +475,10 @@ async function showApplication() {
 function showView(viewName) {
 
     document.querySelectorAll(".view").forEach(section => {
-
         section.hidden = true;
-
     });
 
-    const selectedView = document.getElementById(viewName);
+    const selectedView = getElement(viewName);
 
     if (!selectedView) return;
 
@@ -303,9 +506,7 @@ function showView(viewName) {
 document.querySelectorAll(".nav-button").forEach(button => {
 
     button.addEventListener("click", () => {
-
         showView(button.dataset.view);
-
     });
 
 });
@@ -316,9 +517,7 @@ document.querySelectorAll(".nav-button").forEach(button => {
 document.querySelectorAll("[data-go]").forEach(button => {
 
     button.addEventListener("click", () => {
-
         showView(button.dataset.go);
-
     });
 
 });
@@ -326,81 +525,92 @@ document.querySelectorAll("[data-go]").forEach(button => {
 
 // =========================================
 // DATASET UPLOAD
+// POST /dataset
 // =========================================
 
-document.getElementById("uploadForm").addEventListener("submit", async (event) => {
+if (getElement("uploadForm")) {
 
-    event.preventDefault();
+    getElement("uploadForm").addEventListener("submit", async (event) => {
 
-    const fileInput = document.getElementById("csvFile");
-    const message = document.getElementById("uploadMessage");
+        event.preventDefault();
 
-    const file = fileInput.files[0];
+        const fileInput = getElement("csvFile");
+        const message = getElement("uploadMessage");
 
-    if (!file) {
+        const file = fileInput.files[0];
 
-        message.textContent = "Please select a CSV file.";
-        message.classList.add("error");
+        message.textContent = "";
+        message.classList.remove("error");
 
-        return;
+        if (!file) {
 
-    }
+            message.textContent = "Please select a CSV file.";
+            message.classList.add("error");
 
-    if (!file.name.toLowerCase().endsWith(".csv")) {
+            return;
 
-        message.textContent = "Only CSV files are allowed.";
-        message.classList.add("error");
+        }
 
-        return;
+        if (!file.name.toLowerCase().endsWith(".csv")) {
 
-    }
+            message.textContent = "Only CSV files are allowed.";
+            message.classList.add("error");
 
-    if (file.size > 5 * 1024 * 1024) {
+            return;
 
-        message.textContent = "File size exceeds the 5 MB limit.";
-        message.classList.add("error");
+        }
 
-        return;
+        if (file.size > 5 * 1024 * 1024) {
 
-    }
+            message.textContent = "File size exceeds the 5 MB limit.";
+            message.classList.add("error");
 
-    const formData = new FormData();
+            return;
 
-    formData.append("file", file);
+        }
 
-    message.textContent = "Uploading your dataset...";
-    message.classList.remove("error");
+        const formData = new FormData();
 
-    try {
+        formData.append("file", file);
 
-        await apiRequest("/dataset", {
-            method: "POST",
-            body: formData
-        });
+        message.textContent = "Uploading your dataset...";
 
-        message.textContent = "Dataset uploaded successfully!";
+        try {
 
-        fileInput.value = "";
+            const data = await apiRequest("/dataset", {
 
-        await loadDatasets();
+                method: "POST",
+                body: formData
 
-    } catch (error) {
+            });
 
-        message.textContent = error.message;
-        message.classList.add("error");
+            message.textContent =
+                data?.message || "Dataset uploaded successfully!";
 
-    }
+            fileInput.value = "";
 
-});
+            await loadDatasets();
+
+        } catch (error) {
+
+            message.textContent = error.message;
+            message.classList.add("error");
+
+        }
+
+    });
+
+}
 
 
 // =========================================
 // LOAD DATASETS
+// GET /datasets
 // =========================================
 
 async function loadDatasets() {
 
-    const list = document.getElementById("datasetList");
+    const list = getElement("datasetList");
 
     try {
 
@@ -412,6 +622,7 @@ async function loadDatasets() {
 
     } catch (error) {
 
+        // Backend returns 404 when no datasets exist.
         if (error.message.toLowerCase().includes("no dataset")) {
 
             datasets = [];
@@ -421,7 +632,9 @@ async function loadDatasets() {
 
         }
 
-        list.textContent = error.message;
+        if (list) {
+            list.textContent = error.message;
+        }
 
         throw error;
 
@@ -436,10 +649,16 @@ async function loadDatasets() {
 
 function renderDatasets() {
 
-    const list = document.getElementById("datasetList");
+    const list = getElement("datasetList");
 
-    document.getElementById("datasetCount").textContent =
-        datasets.length.toString().padStart(2, "0");
+    if (!list) return;
+
+    if (getElement("datasetCount")) {
+
+        getElement("datasetCount").textContent =
+            datasets.length.toString().padStart(2, "0");
+
+    }
 
     list.innerHTML = "";
 
@@ -469,7 +688,7 @@ function renderDatasets() {
             const info = document.createElement("p");
 
             info.textContent =
-                `Dataset ID: ${dataset.dataset_id}  ·  ${dataset.rows} rows  ·  ${dataset.columns} columns`;
+                `Dataset ID: ${dataset.dataset_id} · ${dataset.rows} rows · ${dataset.columns} columns`;
 
             details.append(title, info);
 
@@ -479,9 +698,7 @@ function renderDatasets() {
             deleteButton.textContent = "Delete";
 
             deleteButton.addEventListener("click", () => {
-
                 deleteDataset(dataset.dataset_id);
-
             });
 
             item.append(details, deleteButton);
@@ -504,11 +721,13 @@ function renderDatasets() {
 function populateDatasetSelects() {
 
     const selects = [
-        document.getElementById("analysisDataset"),
-        document.getElementById("cleanDataset")
+        getElement("analysisDataset"),
+        getElement("cleanDataset")
     ];
 
     selects.forEach(select => {
+
+        if (!select) return;
 
         const previousValue = select.value;
 
@@ -531,9 +750,7 @@ function populateDatasetSelects() {
                 String(dataset.dataset_id) === previousValue
             )
         ) {
-
             select.value = previousValue;
-
         }
 
     });
@@ -545,43 +762,56 @@ function populateDatasetSelects() {
 // SELECTED DATASET DISPLAY
 // =========================================
 
-document.getElementById("analysisDataset").addEventListener("change", event => {
+if (getElement("analysisDataset")) {
 
-    document.getElementById("selectedDataset").textContent =
-        event.target.value || "—";
+    getElement("analysisDataset").addEventListener("change", event => {
 
-});
+        if (getElement("selectedDataset")) {
+
+            getElement("selectedDataset").textContent =
+                event.target.value || "—";
+
+        }
+
+    });
+
+}
 
 
 // =========================================
 // REFRESH DATASETS
 // =========================================
 
-document.getElementById("refreshDatasets").addEventListener("click", async () => {
+if (getElement("refreshDatasets")) {
 
-    const button = document.getElementById("refreshDatasets");
+    getElement("refreshDatasets").addEventListener("click", async () => {
 
-    button.disabled = true;
+        const button = getElement("refreshDatasets");
 
-    try {
+        button.disabled = true;
 
-        await loadDatasets();
+        try {
 
-    } catch (error) {
+            await loadDatasets();
 
-        alert(error.message);
+        } catch (error) {
 
-    } finally {
+            alert(error.message);
 
-        button.disabled = false;
+        } finally {
 
-    }
+            button.disabled = false;
 
-});
+        }
+
+    });
+
+}
 
 
 // =========================================
 // DELETE DATASET
+// DELETE /dataset/{dataset_id}
 // =========================================
 
 async function deleteDataset(id) {
@@ -613,257 +843,381 @@ async function deleteDataset(id) {
 
 // =========================================
 // ANALYZE DATASET
+// GET /dataset/{dataset_id}
 // =========================================
 
-document.getElementById("runAnalysis").addEventListener("click", async () => {
+if (getElement("runAnalysis")) {
 
-    const id = document.getElementById("analysisDataset").value;
+    getElement("runAnalysis").addEventListener("click", async () => {
 
-    const results = document.getElementById("analysisResults");
+        const id = getElement("analysisDataset").value;
 
-    if (!id) {
+        const results = getElement("analysisResults");
 
-        results.textContent = "Please select a dataset.";
+        if (!id) {
 
-        return;
+            results.textContent = "Please select a dataset.";
 
-    }
+            return;
 
-    results.innerHTML = `
-        <div class="empty-state">
-            <h3>Analyzing your dataset...</h3>
-        </div>
-    `;
-
-    try {
-
-        const data = await apiRequest(`/dataset/${id}`);
-
-        const totalMissing = Object.values(data.total_nulls || {})
-            .reduce((sum, value) => sum + Number(value), 0);
-
-        document.getElementById("selectedDataset").textContent = id;
-
-        document.getElementById("missingCount").textContent =
-            totalMissing.toLocaleString();
-
-        results.innerHTML = `
-            <div class="content-card">
-
-                <p class="eyebrow">ANALYSIS COMPLETE</p>
-
-                <h2>Dataset insights.</h2>
-
-                <div class="result-grid">
-
-                    <div class="result-card">
-                        <h3>Total missing values</h3>
-                        <p>${totalMissing.toLocaleString()}</p>
-                    </div>
-
-                    <div class="result-card">
-                        <h3>Total duplicates</h3>
-                        <p>${Number(data.total_duplicates || 0).toLocaleString()}</p>
-                    </div>
-
-                    <div class="result-card">
-                        <h3>Total columns</h3>
-                        <p>${(data.total_columns || []).length}</p>
-                    </div>
-
-                    <div class="result-card">
-                        <h3>Column count</h3>
-                        <p>${Object.keys(data.data_types || {}).length}</p>
-                    </div>
-
-                </div>
-
-                <div class="result-card">
-                    <h3>Missing values by column</h3>
-                    <pre id="nullResults"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Column data types</h3>
-                    <pre id="typeResults"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Dataset columns</h3>
-                    <pre id="columnResults"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Statistical description</h3>
-                    <pre id="descriptionResults"></pre>
-                </div>
-
-            </div>
-        `;
-
-        document.getElementById("nullResults").textContent =
-            JSON.stringify(data.total_nulls || {}, null, 2);
-
-        document.getElementById("typeResults").textContent =
-            JSON.stringify(data.data_types || {}, null, 2);
-
-        document.getElementById("columnResults").textContent =
-            JSON.stringify(data.total_columns || [], null, 2);
-
-        document.getElementById("descriptionResults").textContent =
-            JSON.stringify(data.description || {}, null, 2);
-
-    } catch (error) {
+        }
 
         results.innerHTML = `
             <div class="empty-state">
-                <h3>Analysis could not be completed.</h3>
-                <p id="analysisError"></p>
+                <h3>Analyzing your dataset...</h3>
             </div>
         `;
 
-        document.getElementById("analysisError").textContent =
-            error.message;
+        try {
 
-    }
+            const data = await apiRequest(`/dataset/${id}`);
 
-});
+            const totalMissing = Object.values(data.total_nulls || {})
+                .reduce((sum, value) => sum + Number(value), 0);
+
+            if (getElement("selectedDataset")) {
+                getElement("selectedDataset").textContent = id;
+            }
+
+            if (getElement("missingCount")) {
+                getElement("missingCount").textContent =
+                    totalMissing.toLocaleString();
+            }
+
+            results.innerHTML = `
+
+                <div class="content-card">
+
+                    <p class="eyebrow">ANALYSIS COMPLETE</p>
+
+                    <h2>Dataset insights.</h2>
+
+                    <div class="result-grid">
+
+                        <div class="result-card">
+                            <h3>Total missing values</h3>
+                            <p>${totalMissing.toLocaleString()}</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Total duplicates</h3>
+                            <p>${Number(data.total_duplicates || 0).toLocaleString()}</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Total columns</h3>
+                            <p>${(data.total_columns || []).length}</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Column count</h3>
+                            <p>${Object.keys(data.data_types || {}).length}</p>
+                        </div>
+
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Missing values by column</h3>
+                        <pre id="nullResults"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Column data types</h3>
+                        <pre id="typeResults"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Dataset columns</h3>
+                        <pre id="columnResults"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Statistical description</h3>
+                        <pre id="descriptionResults"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Unique values by column</h3>
+                        <pre id="uniqueResults"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Non-null values by column</h3>
+                        <pre id="nonNullResults"></pre>
+                    </div>
+
+                </div>
+
+            `;
+
+            getElement("nullResults").textContent =
+                JSON.stringify(data.total_nulls || {}, null, 2);
+
+            getElement("typeResults").textContent =
+                JSON.stringify(data.data_types || {}, null, 2);
+
+            getElement("columnResults").textContent =
+                JSON.stringify(data.total_columns || [], null, 2);
+
+            getElement("descriptionResults").textContent =
+                JSON.stringify(data.description || {}, null, 2);
+
+            getElement("uniqueResults").textContent =
+                JSON.stringify(data.unique_columns || {}, null, 2);
+
+            getElement("nonNullResults").textContent =
+                JSON.stringify(data.non_null || {}, null, 2);
+
+        } catch (error) {
+
+            results.innerHTML = `
+
+                <div class="empty-state">
+
+                    <h3>Analysis could not be completed.</h3>
+
+                    <p id="analysisError"></p>
+
+                </div>
+
+            `;
+
+            getElement("analysisError").textContent = error.message;
+
+        }
+
+    });
+
+}
 
 
 // =========================================
 // LOAD CLEANING PROFILE
+// GET /cleaning/{dataset_id}
 // =========================================
 
-document.getElementById("loadCleaning").addEventListener("click", async () => {
+if (getElement("loadCleaning")) {
 
-    const id = document.getElementById("cleanDataset").value;
+    getElement("loadCleaning").addEventListener("click", async () => {
 
-    const profile = document.getElementById("cleaningProfile");
+        const id = getElement("cleanDataset").value;
 
-    if (!id) {
+        const profile = getElement("cleaningProfile");
 
-        profile.textContent = "Please select a dataset.";
+        if (!id) {
 
-        return;
+            profile.textContent = "Please select a dataset.";
 
-    }
+            return;
 
-    profile.innerHTML = `
-        <div class="empty-state">
-            <h3>Inspecting your dataset...</h3>
-        </div>
-    `;
-
-    try {
-
-        const data = await apiRequest(`/cleaning/${id}`);
-
-        profile.innerHTML = `
-            <div class="content-card">
-
-                <p class="eyebrow">DATA QUALITY REPORT</p>
-
-                <h2>Cleaning insights.</h2>
-
-                <div class="result-grid">
-
-                    <div class="result-card">
-                        <h3>Total missing values</h3>
-                        <p>${data.Total_Missing_Values ?? 0}</p>
-                    </div>
-
-                    <div class="result-card">
-                        <h3>Total duplicates</h3>
-                        <p>${data.Total_duplicates ?? 0}</p>
-                    </div>
-
-                </div>
-
-                <div class="result-card">
-                    <h3>Missing values by column</h3>
-                    <pre id="missingColumns"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Rows affected by missing values</h3>
-                    <pre id="affectedRows"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Columns containing missing values</h3>
-                    <pre id="nullColumns"></pre>
-                </div>
-
-                <div class="result-card">
-                    <h3>Invalid data</h3>
-                    <pre id="invalidData"></pre>
-                </div>
-
-            </div>
-        `;
-
-        document.getElementById("missingColumns").textContent =
-            JSON.stringify(data.Columnwise_null || {}, null, 2);
-
-        document.getElementById("affectedRows").textContent =
-            JSON.stringify(data.Rows_affected || [], null, 2);
-
-        document.getElementById("nullColumns").textContent =
-            JSON.stringify(data.Total_null_columns || [], null, 2);
-
-        document.getElementById("invalidData").textContent =
-            JSON.stringify(data.Invalid_data || {}, null, 2);
-
-    } catch (error) {
+        }
 
         profile.innerHTML = `
             <div class="empty-state">
-                <h3>Cleaning profile could not be loaded.</h3>
-                <p id="cleaningError"></p>
+                <h3>Inspecting your dataset...</h3>
             </div>
         `;
 
-        document.getElementById("cleaningError").textContent =
-            error.message;
+        try {
 
+            const data = await apiRequest(`/cleaning/${id}`);
+
+            profile.innerHTML = `
+
+                <div class="content-card">
+
+                    <p class="eyebrow">DATA QUALITY REPORT</p>
+
+                    <h2>Cleaning insights.</h2>
+
+                    <div class="result-grid">
+
+                        <div class="result-card">
+                            <h3>Total missing values</h3>
+                            <p>${data.Total_Missing_Values ?? 0}</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Total duplicates</h3>
+                            <p>${data.Total_duplicates ?? 0}</p>
+                        </div>
+
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Missing values by column</h3>
+                        <pre id="missingColumns"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Rows affected by missing values</h3>
+                        <pre id="affectedRows"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Columns containing missing values</h3>
+                        <pre id="nullColumns"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Duplicate rows</h3>
+                        <pre id="duplicateRows"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Invalid data</h3>
+                        <pre id="invalidData"></pre>
+                    </div>
+
+                    <div class="result-card">
+                        <h3>Invalid data types</h3>
+                        <pre id="invalidTypes"></pre>
+                    </div>
+
+                </div>
+
+            `;
+
+            getElement("missingColumns").textContent =
+                JSON.stringify(data.Columnwise_null || {}, null, 2);
+
+            getElement("affectedRows").textContent =
+                JSON.stringify(data.Rows_affected || [], null, 2);
+
+            getElement("nullColumns").textContent =
+                JSON.stringify(data.Total_null_columns || [], null, 2);
+
+            getElement("duplicateRows").textContent =
+                JSON.stringify(data.Row_duplicates || [], null, 2);
+
+            getElement("invalidData").textContent =
+                JSON.stringify(data.Invalid_data || {}, null, 2);
+
+            getElement("invalidTypes").textContent =
+                JSON.stringify(data.Invalid_datatype || {}, null, 2);
+
+        } catch (error) {
+
+            profile.innerHTML = `
+
+                <div class="empty-state">
+
+                    <h3>Cleaning profile could not be loaded.</h3>
+
+                    <p id="cleaningError"></p>
+
+                </div>
+
+            `;
+
+            getElement("cleaningError").textContent = error.message;
+
+        }
+
+    });
+
+}
+
+
+// =========================================
+// APPLY CLEANING
+// POST /applied_cleaning/{dataset_id}
+// =========================================
+
+async function applyCleaning(datasetId, request, range) {
+
+    if (!datasetId) {
+        throw new Error("Please select a dataset.");
     }
 
-});
+    if (!request || !range) {
+        throw new Error("Both cleaning request objects are required.");
+    }
+
+    return await apiRequest(`/applied_cleaning/${datasetId}`, {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+
+            request: {
+                selected_columns: request.selected_columns || [],
+                selected_rows: request.selected_rows || [],
+                user_val: Number(request.user_val ?? 0)
+            },
+
+            range: {
+                column: range.column || "",
+                min_value: Number(range.min_value ?? 0),
+                max_value: Number(range.max_value ?? 0)
+            }
+
+        })
+
+    });
+
+}
+
+
+// Accessible to other frontend scripts.
+window.applyCleaning = applyCleaning;
 
 
 // =========================================
 // CLEANING OPERATION SELECTION
 // =========================================
 
-document.getElementById("operation").addEventListener("change", event => {
+if (getElement("operation")) {
 
-    const operation = event.target.value;
+    getElement("operation").addEventListener("change", event => {
 
-    document.getElementById("fillFields").hidden =
-        operation !== "fill";
+        const operation = event.target.value;
 
-    document.getElementById("rangeFields").hidden =
-        operation !== "range";
+        if (getElement("fillFields")) {
+            getElement("fillFields").hidden = operation !== "fill";
+        }
 
-    document.getElementById("numericFields").hidden =
-        operation !== "numeric";
+        if (getElement("rangeFields")) {
+            getElement("rangeFields").hidden = operation !== "range";
+        }
 
-});
+        if (getElement("numericFields")) {
+            getElement("numericFields").hidden = operation !== "numeric";
+        }
+
+    });
+
+}
 
 
 // =========================================
 // INITIAL APPLICATION CHECK
 // =========================================
 
-if (accessToken) {
+async function initializeApplication() {
 
-    showApplication();
+    if (!accessToken) {
 
-} else {
+        getElement("authView").hidden = false;
+        getElement("appView").hidden = true;
 
-    document.getElementById("authView").hidden = false;
-    document.getElementById("appView").hidden = true;
+        setAuthMode("login");
 
-    setAuthMode("login");
+        return;
+
+    }
+
+    getElement("authView").hidden = true;
+    getElement("appView").hidden = false;
+
+    await showApplication();
 
 }
+
+
+// Start application.
+initializeApplication();
