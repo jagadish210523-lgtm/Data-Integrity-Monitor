@@ -2,8 +2,10 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 import pandas as pd
 import app.models
+import io
 from app.database import SessionLocal
 from sqlalchemy.orm import Session
+from app.storage import download_file
 from pydantic import BaseModel
 from typing import Annotated
 from routers.auth import decode_token
@@ -44,28 +46,32 @@ def clean_dataset(dataset_id : int,login : auth_token, db : db_dependency):
                                                 app.models.Dataset.dataset_id == dataset_id).first()
     if owner is None:
         raise HTTPException(status_code = 404, detail = "No datasets found")
-    if os.path.exists(owner.file_path):
-        df = pd.read_csv(owner.file_path)
-        total_missing_values = df.isna().sum().sum()
-        missing_values_columns = df.isna().sum()
-        rows_affected = df[df.isna().any(axis=1)].index
-        null_columns = df.columns[df.isna().any()]
-        duplicates = df.duplicated()
-        total_duplicates = df.duplicated().sum()
-        exact_row = df[df.duplicated(keep = False)].index
-        selected_columns = [...]
-        column_duplicate = df.duplicated(subset = selected_columns, keep = False)
-        row_group = df.groupby(selected_columns).size()
-        numerics_only = df.select_dtypes(include = "numbers")
-        invalid_values = pd.to_numerics(numerics_only, errors = "coerce")
-        numerics_only[numerics_only < 0] = 0
-        for columns in df.columns:
-            datatype = pd.api.types.is_numeric_dtype(df[columns])
-            if datatype is False:
-                new_dtype.isna()
-                new_dtype = pd.to_numeric(df[columns], errors = "coerce")
-    else:
-        raise HTTPException(status_code = 404, detail = "No file found in the provided path")
+    try:
+        file_content = download_file(owner.file_path)
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = "Failed to retrieve the ") from e
+    try:
+        df = pd.read_csv(io.BytesIO(file_content))
+    except (pd.errors.ParserError, UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code = 400, detail = "Unreadable csv file")
+    total_missing_values = df.isna().sum().sum()
+    missing_values_columns = df.isna().sum()
+    rows_affected = df[df.isna().any(axis=1)].index
+    null_columns = df.columns[df.isna().any()]
+    duplicates = df.duplicated()
+    total_duplicates = df.duplicated().sum()
+    exact_row = df[df.duplicated(keep = False)].index
+    selected_columns = df.columns.tolist()
+    column_duplicate = df.duplicated(subset = selected_columns, keep = False)
+    row_group = df.groupby(selected_columns).size()
+    numerics_only = df.select_dtypes(include = "numbers")
+    invalid_values = numerics_only.apply(pd.to_numeric, errors = "coerce")
+    numerics_only[numerics_only < 0] = 0
+    invalid_datatype = {}
+    for column in df.columns:
+        converted_column = (pd.to_numeric(df[column], errors = "coerce"))
+        invalid_rows = (df[column].notna() & converted_column.isna())
+        invalid_datatype[column] = invalid_rows.to_dict()
     return {
         "Total_Missing_Values" : int(total_missing_values),
         "Columnwise_null" : missing_values_columns.to_dict(),
@@ -77,7 +83,7 @@ def clean_dataset(dataset_id : int,login : auth_token, db : db_dependency):
         "Column_duplicates" : column_duplicate.to_list(),
         "Grouped_duplicates" : row_group.to_dict(),
         "Invalid_data" : invalid_values.to_dict(),
-        "Invalid_datatype" : new_dtype.to_dict()
+        "Invalid_datatype" : invalid_datatype
     }
 
 
@@ -91,26 +97,32 @@ def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, requ
                                                 app.models.Dataset.owner_id == user_id).first()
     if owner is None:
         raise HTTPException(status_code = 404, detail = "No datasets found")
-    if os.path.exists(owner.file_path):
-        df = pd.read_csv(owner.file_path)
-        selected_rows = request.selected_rows
-        selected_columns = request.selected_columns
-        df = df.drop(columns = selected_columns)
-        numeric_columns = df.select_dtypes(include = "number")
-        fill_mean = numeric_columns.mean()
-        median_fill = numeric_columns.median()
-        df[selected_columns] = df[selected_columns].fillna(request.user_val)
-        df.duplicated()
-        df = df.drop_duplicates(keep = "first")
-        column = request.column
-        min_value = range.min_value
-        max_value = range.max_value
+    try:
+        file_content = download_file(owner.file_path)
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = "Failed to retrieve dataset") from e
+    try:
+        df = pd.read_csv(io.BytesIO(file_content))
+    except(pd.errors.ParserError, UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code = 400, detail = "Unreadable CSV file")
+    selected_rows = request.selected_rows
+    selected_columns = request.selected_columns
+    df[selected_columns] = df[selected_columns].fillna(request.user_val)
+    numeric_columns = df.select_dtypes(include = "number")
+    fill_mean = numeric_columns.mean()
+    median_fill = numeric_columns.median()
+    df[selected_columns] = df[selected_columns].fillna(request.user_val)
+    df.duplicated()
+    df = df.drop_duplicates(keep = "first")
+    column = range.column
+    min_value = range.min_value
+    max_value = range.max_value
+    if column not in df.columns:
+        raise HTTPException(status_code=400, detail="Invalid column")
+    numeric_values = pd.to_numeric(df[column], errors="coerce")
+    invalid_values = (numeric_values < min_value) | (numeric_values > max_value)
+    df.loc[invalid_values, column] = None
+    for column in range.selected_columns:
         if column not in df.columns:
-            raise HTTPException(status_code=400, detail="Invalid column")
-        numeric_values = pd.to_numeric(df[column], errors="coerce")
-        invalid_values = (numeric_values < min_value) | (numeric_values > max_value)
-        df.loc[invalid_values, column] = None
-        for column in range.selected_columns:
-            if column not in df.columns:
-                raise HTTPException(status_code=400, detail=f"Invalid column: {column}")
+            raise HTTPException(status_code=400, detail=f"Invalid column: {column}")
         df[column] = pd.to_numeric(df[column], errors="coerce")

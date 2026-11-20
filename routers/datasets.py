@@ -3,6 +3,7 @@ import os
 import uuid
 import pandas as pd
 from pathlib import Path
+from app.storage import upload_file, download_file, delete_file
 from routers.auth import decode_token
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, status, Header
 from dotenv import load_dotenv
@@ -32,14 +33,9 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-STORAGE_DIR = BASE_DIR/"storage"/"datasets"
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-
-
 @dataset.post("/dataset")
 async def new_dataset(login : auth_token, db : db_dependency, file : UploadFile = File(...)):
-    user_id = login["sub"]
+    user_id = int(login["sub"])
     user = db.query(app.models.Users).filter(app.models.Users.id == user_id).first()
     if user is None:
         raise HTTPException(status_code = 404, detail = "No user found")
@@ -85,27 +81,27 @@ async def new_dataset(login : auth_token, db : db_dependency, file : UploadFile 
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="CSV file contains no data rows"
             )
-        unique_filename = f"{uuid.uuid4()}.csv"
-        filepath = STORAGE_DIR/unique_filename
+        object_key = f"datasets/{uuid.uuid4()}.csv"
         db_record = app.models.Dataset(
             owner_id = user_id,
             name = file.filename,
             rows = len(new_file),
             columns = len(new_file.columns),
-            file_path = str(filepath)
+            file_path = object_key
         )
         try:
-            with open(filepath, "wb") as destination:
-                destination.write(buffer.getvalue())
-        except OSError:
-            filepath.unlink(missing_ok = True)
-            raise HTTPException(status_code = status.HTTP_500_INTERNAL_SERVER_ERROR, detail = "Failed to save the uploaded file")
+            upload_file(buffer.getvalue(), object_key)
+        except Exception as e:
+            raise HTTPException(status_code = 500, detail = "Failed to save dataset to storage") from e
         try:
             db.add(db_record)
             db.commit()
         except Exception:
             db.rollback()
-            filepath.unlink(missing_ok = True)
+            try:
+                delete_file(object_key)
+            except Exception:
+                pass
             raise
         return {
             "status": "success",
@@ -124,7 +120,7 @@ async def new_dataset(login : auth_token, db : db_dependency, file : UploadFile 
 
 @dataset.get("/dataset/{dataset_id}")
 def scan_file(auth : auth_token, dataset_id : int, db : db_dependency):
-    user_id = auth["sub"]
+    user_id = int(auth["sub"])
     users = db.query(app.models.Users).filter(app.models.Users.id == user_id).first()
     if users is None:
         raise HTTPException(status_code = 404, detail = "No active users found")
@@ -132,13 +128,17 @@ def scan_file(auth : auth_token, dataset_id : int, db : db_dependency):
     if file is None:
         raise HTTPException(status_code = 404, detail = "No dataset found")
     try:
-        df = pd.read_csv(file.file_path)
-    except FileNotFoundError:
-        raise HTTPException(status_code = 404, detail = "No datasets found")
+        file_content = download_file(file.file_path)
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = "failed to retrieve dataset from storage") from e
+    try: 
+        df = pd.read_csv(io.BytesIO(file_content))
+    except (pd.errors.ParserError, UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code = 400, detail = "Unreadable csv file")
     return {
         "columns" : df.columns.to_list(),
-        "non_null" : df.count(),
-        "unique_columns" : df.nunique(),
+        "non_null" : df.count().to_dict(),
+        "unique_columns" : df.nunique().to_dict(),
         "total_nulls" : df.isnull().sum().to_dict(),
         "total_duplicates" : int(df.duplicated().sum()),
         "total_columns" : df.columns.tolist(),
@@ -168,10 +168,9 @@ def remove_dataset(dataset_id : int, user : auth_token, db : db_dependency):
     if not datasets:
         raise HTTPException(status_code = 404, detail = "No datasets found")
     try:
+        delete_file(datasets.file_path)
         db.delete(datasets)
-        if os.path.exists(datasets.file_path) and os.path.isfile(datasets.file_path):
-            os.remove(datasets.file_path)
         db.commit()
     except Exception:
         db.rollback()
-        raise
+        raise 
