@@ -1,11 +1,11 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 import pandas as pd
 import app.models
 import io
 from app.database import SessionLocal
 from sqlalchemy.orm import Session
-from app.storage import download_file
+from app.storage import download_file, upload_file
 from pydantic import BaseModel
 from typing import Annotated
 from routers.auth import decode_token
@@ -31,7 +31,8 @@ class NumericConversionRequest(BaseModel):
 class CleaningRequest(BaseModel):
     selected_columns : list[str]
     selected_rows : list[str]
-    user_val : float
+    fill_method : str
+    user_val : float | None = None
 
 db_dependency = Annotated[Session, Depends(get_db)]
 auth_token = Annotated[dict, Depends(decode_token)]
@@ -64,14 +65,11 @@ def clean_dataset(dataset_id : int,login : auth_token, db : db_dependency):
     selected_columns = df.columns.tolist()
     column_duplicate = df.duplicated(subset = selected_columns, keep = False)
     row_group = df.groupby(selected_columns).size()
-    numerics_only = df.select_dtypes(include = "numbers")
-    invalid_values = numerics_only.apply(pd.to_numeric, errors = "coerce")
-    numerics_only[numerics_only < 0] = 0
-    invalid_datatype = {}
-    for column in df.columns:
-        converted_column = (pd.to_numeric(df[column], errors = "coerce"))
-        invalid_rows = (df[column].notna() & converted_column.isna())
-        invalid_datatype[column] = invalid_rows.to_dict()
+    invalid_values = {}
+    for columns in df.columns:
+        converted = pd.to_numeric(df[columns], errors = "coerce")
+        invalid_rows = df[columns].notna() & converted.isna()
+        invalid_values[columns] = invalid_rows.to_dict()
     return {
         "Total_Missing_Values" : int(total_missing_values),
         "Columnwise_null" : missing_values_columns.to_dict(),
@@ -82,8 +80,8 @@ def clean_dataset(dataset_id : int,login : auth_token, db : db_dependency):
         "Row_duplicates" : exact_row.to_list(),
         "Column_duplicates" : column_duplicate.to_list(),
         "Grouped_duplicates" : row_group.to_dict(),
-        "Invalid_data" : invalid_values.to_dict(),
-        "Invalid_datatype" : invalid_datatype
+        "Invalid_data" : invalid_values,
+        "Invalid_datatype" : invalid_values
     }
 
 
@@ -107,22 +105,89 @@ def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, requ
         raise HTTPException(status_code = 400, detail = "Unreadable CSV file")
     selected_rows = request.selected_rows
     selected_columns = request.selected_columns
-    df[selected_columns] = df[selected_columns].fillna(request.user_val)
-    numeric_columns = df.select_dtypes(include = "number")
-    fill_mean = numeric_columns.mean()
-    median_fill = numeric_columns.median()
-    df[selected_columns] = df[selected_columns].fillna(request.user_val)
-    df.duplicated()
+    for column in selected_columns:
+        if column not in df.columns:
+            raise HTTPException(status_code = 400, detail = f"Invalid column")
+    for row in selected_rows:
+        if not row.isdigit() or int(row) not in df.index:
+            raise HTTPException(status_code = 400, detail = f"Invalid row: {row}")
+    selected_row_indices = [int(row) for row in selected_rows]
+    if request.fill_method == "custom":
+        if request.user_val is None:
+            raise HTTPException(status_code = 400, detail = "Custom value required!")
+        df.loc[selected_row_indices, selected_columns] = (df.loc[selected_row_indices, selected_columns].fillna(request.user_val))
+    elif request.fill_method == "mean":
+        for column in selected_columns:
+            if column not in df.columns:
+                raise HTTPException(status_code = 400, detail = f"Invalid column: {column}")
+            if not pd.api.types.is_numeric_dtype(df[column]):
+                raise HTTPException(status_code = 400, detail = f"Mean cannot be applied to Non-numeric column: {column}")
+            mean_value = df[column].mean()
+            df.loc[selected_row_indices, column] = (df.loc[selected_row_indices, column].fillna(mean_value))
+    elif request.fill_method == "median":
+        for column in selected_columns:
+            if column not in df.columns:
+                raise HTTPException(status_code = 400, detail = f"Invalid columns: {column}")
+            if not pd.api.types.is_numeric_dtype(df[column]):
+                raise HTTPException(status_code = 400, detail = f"Median cannot be applied to non-numeric column: {column}")
+            median_value = df[column].median()
+            df.loc[selected_row_indices, column] = (df.loc[selected_row_indices, column].fillna(median_value))
+    else:
+        raise HTTPException(status_code = 400, detail = "Invalid filling method")
+    df.loc[invalid_values, column] = None
     df = df.drop_duplicates(keep = "first")
     column = range.column
     min_value = range.min_value
     max_value = range.max_value
     if column not in df.columns:
-        raise HTTPException(status_code=400, detail="Invalid column")
-    numeric_values = pd.to_numeric(df[column], errors="coerce")
-    invalid_values = (numeric_values < min_value) | (numeric_values > max_value)
+        raise HTTPException(status_code = 400, detail = "Invalid column")
+    if min_value > max_value:
+        raise HTTPException(status_code = 400, detail = "Minimum value cannot be greater than maximum value")
+    numeric_values = pd.to_numeric(df[column], errors = "coerce")
+    if not pd.api.is_numeric_dtype(df[column]):
+        raise HTTPException(status_code = 400, detail = "Range validation requires a numeric column")
+    invalid_values = ((numeric_values < min_value) | (numeric_values > max_value))
+    invalid_values = invalid_values & df.index.isin(selected_row_indices)
     df.loc[invalid_values, column] = None
-    for column in range.selected_columns:
-        if column not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Invalid column: {column}")
-        df[column] = pd.to_numeric(df[column], errors="coerce")
+    cleaned_csv = df.to_csv(index = False).encode("utf-8")
+    try:
+        upload_file(cleaned_csv, owner.file_path)
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = "Failed to save cleaned dataset") from e
+    owner.rows = len(df)
+    owner.columns = len(df.columns)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code = 500, detail = "Failed to update dataset metadata") from e
+    return {
+        "message" : "Dataset cleaned successfully",
+        "dataset_id" : dataset_id,
+        "rows" : len(df),
+        "column" : len(df.columns)
+    }
+
+
+@clean.get("/dataset/{dataset_id}/download")
+def download_dataset(dataset_id : int, login : auth_token, db : db_dependency):
+    user_id = login["sub"]
+    user = db.query(app.models.Users).filter(app.models.User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code = 401, detail = "Unauthorized access")
+    owner = db.query(app.models.Dataset).filter(app.models.Dataset.dataset_id == dataset_id, app.models.Dataset.owner_id == user_id).first()
+    if owner is None:
+        raise HTTPException(status_code = 404, detail = "No dataset found")
+    try:
+        file_content = download_file(owner.file_path)
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = "faied to retrieve dataset")
+    filename = f"cleaned_{os.path.basename(owner.name)}"
+    return Response(
+        content = file_content,
+        media_type = "text/csv",
+        headers = {
+            "Content-Disposition" : f'attachment; filename = "{filename}"'
+        }
+    )
+    

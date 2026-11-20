@@ -1513,3 +1513,54 @@ input[type="file"] {
     outline-offset: 2px;
     border-radius: 4px;
 }
+/* =========================================
+   CLEANING WORKSPACE ADDITIONS
+========================================= */
+
+.cleaning-range-fields {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--dark-border);
+}
+
+#fillMethod {
+    margin-bottom: 18px;
+}
+
+#customValueField {
+    margin-bottom: 20px;
+}
+
+#customValueField[hidden] {
+    display: none !important;
+}
+
+.cleaning-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.cleaning-actions button {
+    min-width: 190px;
+}
+
+.cleaning-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#cleaningActionMessage {
+    margin-top: 16px;
+}
+
+@media (max-width: 600px) {
+    .cleaning-actions {
+        flex-direction: column;
+    }
+
+    .cleaning-actions button {
+        width: 100%;
+    }
+}
