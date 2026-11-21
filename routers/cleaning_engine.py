@@ -86,7 +86,7 @@ def clean_dataset(dataset_id : int,login : auth_token, db : db_dependency):
 
 
 @clean.post("/applied_cleaning/{dataset_id}")
-def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, request : CleaningRequest, range : RangeCleaningRequest):
+def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, request : CleaningRequest, range : RangeCleaningRequest | None = None):
     user_id = login["sub"]
     user = db.query(app.models.Users).filter(app.models.Users.id == user_id).first()
     if user is None:
@@ -134,21 +134,21 @@ def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, requ
             df.loc[selected_row_indices, column] = (df.loc[selected_row_indices, column].fillna(median_value))
     else:
         raise HTTPException(status_code = 400, detail = "Invalid filling method")
-    df.loc[invalid_values, column] = None
     df = df.drop_duplicates(keep = "first")
-    column = range.column
-    min_value = range.min_value
-    max_value = range.max_value
-    if column not in df.columns:
-        raise HTTPException(status_code = 400, detail = "Invalid column")
-    if min_value > max_value:
-        raise HTTPException(status_code = 400, detail = "Minimum value cannot be greater than maximum value")
-    numeric_values = pd.to_numeric(df[column], errors = "coerce")
-    if not pd.api.is_numeric_dtype(df[column]):
-        raise HTTPException(status_code = 400, detail = "Range validation requires a numeric column")
-    invalid_values = ((numeric_values < min_value) | (numeric_values > max_value))
-    invalid_values = invalid_values & df.index.isin(selected_row_indices)
-    df.loc[invalid_values, column] = None
+    if range is not None:
+        column = range.column
+        min_value = range.min_value
+        max_value = range.max_value
+        if column not in df.columns:
+            raise HTTPException(status_code = 400, detail = "Invalid column")
+        if min_value > max_value:
+            raise HTTPException(status_code = 400, detail = "Minimum value cannot be greater than maximum value")
+        if not pd.api.is_numeric_dtype(df[column]):
+            raise HTTPException(status_code = 400, detail = "Range validation requires a numeric column")
+        numeric_values = pd.to_numeric(df[column], errors = "coerce")
+        invalid_values = ((numeric_values < min_value) | (numeric_values > max_value))
+        invalid_values = invalid_values & df.index.isin(selected_row_indices)
+        df.loc[invalid_values, column] = None
     cleaned_csv = df.to_csv(index = False).encode("utf-8")
     try:
         upload_file(cleaned_csv, owner.file_path)
@@ -172,7 +172,7 @@ def apply_cleaning(dataset_id : int,login : auth_token, db : db_dependency, requ
 @clean.get("/dataset/{dataset_id}/download")
 def download_dataset(dataset_id : int, login : auth_token, db : db_dependency):
     user_id = login["sub"]
-    user = db.query(app.models.Users).filter(app.models.User.id == user_id).first()
+    user = db.query(app.models.Users).filter(app.models.Users.id == user_id).first()
     if user is None:
         raise HTTPException(status_code = 401, detail = "Unauthorized access")
     owner = db.query(app.models.Dataset).filter(app.models.Dataset.dataset_id == dataset_id, app.models.Dataset.owner_id == user_id).first()
